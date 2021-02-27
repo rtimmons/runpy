@@ -1,8 +1,31 @@
 #!/usr/bin/env bash
 
 set -eou pipefail
+
+# runpy helps bootstrap python and prints helpful diagnostics when things go wrong.
+# This script has evolved to handle the following:
+#
+# - missing python
+# - python version < 3.7 installed
+# - running with pyenv
+# - running with an existing venv
+#
+# This script is designed to be copy/pasted into your repo.
+
+
+# Settings
+
+    CRYPTO_WORKAROUND=true
+
+
+# No edits intended beyond this line.
+
 _pip() {
-    CRYPTOGRAPHY_DONT_BUILD_RUST=1 /usr/bin/env python3 -m pip "$@" --isolated -q -q
+    if [[ "${CRYPTO_WORKAROUND}" == "true" ]]; then
+        CRYPTOGRAPHY_DONT_BUILD_RUST=1 /usr/bin/env python3 -m pip "$@" --isolated -q -q
+    else
+        /usr/bin/env python3 -m pip "$@" --isolated -q -q
+    fi
 }
 
 pushd "$(dirname "$0")" >/dev/null
