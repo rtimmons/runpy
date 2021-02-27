@@ -2,6 +2,8 @@
 
 set -eou pipefail
 
+# docker run -i -v $PWD:$PWD ubuntu:bionic $PWD/runpy
+
 # runpy helps bootstrap python and prints helpful diagnostics when things go wrong.
 # This script has evolved to handle the following:
 #
@@ -92,7 +94,7 @@ _recommend_pyenv() {
     echo >&2 "    curl https://pyenv.run | bash"
     echo >&2 ""
     echo >&2 "Ensure you restart your shell."
-    if /usr/bin/which brew >/dev/null 2>&1; then
+    if which brew >/dev/null 2>&1; then
         echo >&2 "On macOS, another option is to use homebrew python:"
         echo >&2 ""
         echo >&2 "    brew install python3"
@@ -101,7 +103,7 @@ _recommend_pyenv() {
 }
 
 
-if ! /usr/bin/which python3 >/dev/null 2>&1; then
+if ! which python3 >/dev/null 2>&1; then
     echo >&2 "No base python3 installed."
     echo >&2 ""
     _recommend_pyenv
@@ -132,18 +134,39 @@ fi
 
 # TODO: handle the "true bootstrap" scenario and install pyenv.
 
+_install_pyenv() {
+    local set_pyenv_root
+    # TODO: install in venv root or something?
+    if [ -z "${PYENV_ROOT:-}" ]; then
+        export PYENV_ROOT="$REPO_ROOT/.pyenv"
+        set_pyenv_root=1
+    fi
+
+    if [ ! -e "$REPO_ROOT/.pyenv/setup-done" ]; then
+        rm -rf "$REPO_ROOT/.pyenv"
+        # TODO: this is very noisy
+        curl "https://pyenv.run" | bash
+        touch "$REPO_ROOT/.pyenv/setup-done"
+    fi
+
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)"
+
+    if [[ "${set_pyenv_root}" == 1 ]]; then
+        export PYENV_ROOT=
+    fi
+}
+
 if [ -e "${REPO_ROOT}/.python-version" ] && ! which pyenv >/dev/null 2>&1; then
-    echo >&2 "There is a .python-version file at ${REPO_ROOT}/.python-version"
-    echo >&2 "but pyenv is not installed."
-    echo >&2 ""
-    echo >&2 "Install pyenv with the following:"
-    echo >&2 ""
-    echo >&2 "    curl https://pyenv.run | bash"
-    echo >&2 ""
-    echo >&2 "And then ensure you restart your shell."
-    echo >&2
-    _print_diagnostics
-    exit 1
+    echo "Installing pyenv"
+    _install_pyenv
+fi
+
+if [ -e "${REPO_ROOT}/.python-version" ]; then
+    pushd "${REPO_ROOT}" >/dev/null
+        echo "Installing python $(cat "${REPO_ROOT}/.python-version")"
+        pyenv install -s
+    popd >/dev/null
 fi
 
 if which pyenv >/dev/null 2>&1; then
@@ -191,6 +214,7 @@ fi
 # Check for runpy-setup-done-v3 which we create at the end of setup.
 # This prevents half-setup environments.
 if [[ ! -d "${REPO_VENV_PATH}" || ! -e "${REPO_VENV_PATH}/runpy-setup-done-v3" ]]; then
+    echo "Setting up venv $REPO_VENV_PATH"
     rm -rf "${REPO_VENV_PATH}"
 
     python3 -m venv "${REPO_VENV_PATH}"
@@ -217,17 +241,16 @@ if [[ ! -d "${REPO_VENV_PATH}" || ! -e "${REPO_VENV_PATH}/runpy-setup-done-v3" ]
     deactivate
 fi
 
-PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}" "${REPO_VENV_PATH}/bin/python3" "$@"
+export VIRTUAL_ENV_DISABLE_PROMPT=1  # prevent undefined $PS1 variable
+# shellcheck source=/dev/null
+source "${REPO_VENV_PATH}/bin/activate"
 
+# TODO: unset local vars and funcs
+# TODO: support multiple PYTHONPATH prefixes in settings vars
 
-# py3=$(resolve python3)
-# pye3=$(pyenv which python3)
-# if [[ "$py3" != "$pye3" ]]; then
-#     echo >&2 "Pyenv is installed but could not be activated."
-#     echo >&2 ""
-#     echo >&2 "    which python3:       $py3"
-#     echo >&2 "    pyenv which python3: $pye3"
-#     echo >&2 ""
-#     (pyenv init) >/dev/stderr
-#     exit 1
-# fi
+if [[ "${1:-}" == "-env" ]]; then
+    shift
+    PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}" "$@"
+else
+    PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}" "${REPO_VENV_PATH}/bin/python3" "$@"
+fi
