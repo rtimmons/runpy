@@ -2,32 +2,24 @@
 
 set -eou pipefail
 _pip() {
-    # see TIG-2862
     CRYPTOGRAPHY_DONT_BUILD_RUST=1 /usr/bin/env python3 -m pip "$@" --isolated -q -q
 }
 
-_dsi_venv="dsi_venv"
-
 pushd "$(dirname "$0")" >/dev/null
-    DSI_REPO_ROOT="$(pwd -P)"
+    REPO_ROOT="$(pwd -P)"
 popd >/dev/null
 
+REPO_NAME="$(basename "$REPO_ROOT")"
+REPO_VENV="${REPO_NAME}_venv"
+REPO_VENV_PATH="${REPO_ROOT}/${REPO_VENV}"
 
-if [[ $# -lt 1 ]]; then
-    echo -e "Usage: \\n\\t$0 setup\\n\\t$0 command" >/dev/stderr
-    exit 5
-fi
-
-if [ -d "/opt/mongodbtoolchain/v3/bin" ]; then
-    export PATH="/opt/mongodbtoolchain/v3/bin:$PATH"
-fi
 
 _HAVE_PRINTED_DIAGNOSTICS=
 _print_diagnostics() {
     if [ -n "$_HAVE_PRINTED_DIAGNOSTICS" ]; then
         return
     fi
-    echo >&2 "If you're stuck, please reach out to the #performance MongoDB slack channel and paste this output."
+    echo >&2 "If you're stuck, please cut an issue to the runpy github repo."
     echo >&2 ""
     echo >&2 "  git rev-parse HEAD: $(git rev-parse HEAD)"
     echo >&2 "  uname -a:           $(uname -a)"
@@ -53,7 +45,7 @@ if ! python3 -c 'import sys; sys.exit(1 if sys.version_info < (3, 7) else 0)' >/
     exit 1
 fi
 
-if [ -n "${VIRTUAL_ENV:-}" ] && [ "${VIRTUAL_ENV}" != "${DSI_REPO_ROOT}/dsi_venv" ]; then
+if [ -n "${VIRTUAL_ENV:-}" ] && [ "${VIRTUAL_ENV}" != "${REPO_VENV_PATH}" ]; then
     echo >&2 "You are already inside a virtual environment $VIRTUAL_ENV."
     echo >&2 "This can be problematic. Will try to proceed, but setup may fail."
     echo >&2 "If it does, please deactivate your existing virtualenv first:"
@@ -105,62 +97,33 @@ if ! _pip --version >/dev/null 2>&1; then
 fi
 
 
-# Check for dsi-setup-done-v3 which we create at the end of setup.
+# Check for runpy-setup-done-v3 which we create at the end of setup.
 # This prevents half-setup environments.
-if [[ ! -d "${DSI_REPO_ROOT}/${_dsi_venv}" || ! -e "${DSI_REPO_ROOT}/${_dsi_venv}/dsi-setup-done-v3" ]]; then
-    rm -rf "${DSI_REPO_ROOT:?}/${_dsi_venv}"
+if [[ ! -d "${REPO_VENV_PATH}" || ! -e "${REPO_VENV_PATH}/runpy-setup-done-v3" ]]; then
+    rm -rf "${REPO_VENV_PATH}"
 
-    python3 -m venv "${DSI_REPO_ROOT}/${_dsi_venv}"
+    python3 -m venv "${REPO_VENV_PATH}"
 
     export VIRTUAL_ENV_DISABLE_PROMPT=1  # prevent undefined $PS1 variable
     # shellcheck source=/dev/null
-    source "${DSI_REPO_ROOT}/${_dsi_venv}/bin/activate"
+    source "${REPO_VENV_PATH}/bin/activate"
 
     # Upgrade pip itself
     _pip install --upgrade pip setuptools wheel
 
-    # Install DSI requirements
-    _pip install -r "${DSI_REPO_ROOT}/requirements.txt"
-
-    _pip freeze > "pip-requirements.txt" 2>/dev/null
+    # Install requirements.txt if exists.
+    if [ -e "${REPO_ROOT}/requirements.txt" ]; then
+        _pip install -r "${REPO_ROOT}/requirements.txt"
+    fi
 
     # Record that we've done setup at the current git sha.
     # (Don't use the sha for now but might in the future to determine
     # if we need to run pip install again or something.)
-    pushd "${DSI_REPO_ROOT}" >/dev/null
-        git rev-parse HEAD > "${DSI_REPO_ROOT}/${_dsi_venv}/dsi-setup-done-v3"
+    pushd "${REPO_ROOT}" >/dev/null
+        git rev-parse HEAD > "${REPO_VENV_PATH}/runpy-setup-done-v3"
     popd >/dev/null
+
+    deactivate
 fi
 
-declare -a COMMAND
-COMMAND=("$@")
-
-
-if [[ "${COMMAND[0]}" == "setup" ]]; then
-    echo "Setup successfully into ${DSI_REPO_ROOT}/${_dsi_venv}."
-    exit 0
-fi
-
-
-export VIRTUAL_ENV_DISABLE_PROMPT=1  # prevent undefined $PS1 variable
-# shellcheck source=/dev/null
-source "${DSI_REPO_ROOT}/${_dsi_venv}/bin/activate"
-
-
-if [[ "${COMMAND[0]}" == "onboarding" ]]; then
-    COMMAND=("python" "${DSI_REPO_ROOT}/src/dsi/onboarding.py")
-elif [[ "${COMMAND[0]}" == "selftest" ]]; then
-    pushd "${DSI_REPO_ROOT}" >/dev/null
-        # Improvement: create a cli command for all the selftests.
-        PYTHONPATH="${DSI_REPO_ROOT}/src:${PYTHONPATH:-}" /usr/bin/env "${COMMAND[1]}"
-        exit $?
-    popd >/dev/null
-elif [[ "${COMMAND[0]}" == "generate_ssl_cert" ]]; then
-    "${DSI_REPO_ROOT}/configurations/mongodb_setup/ssl/generate-ssl-cert.sh"
-    exit $?
-elif [[ ! -e "${COMMAND[0]}" ]]; then
-    COMMAND=("python" "${DSI_REPO_ROOT}/src/dsi/cli.py" "${COMMAND[@]}")
-fi
-# Else we ./run-dsi X invoked with X being a file.
-
-PYTHONPATH="${DSI_REPO_ROOT}/src:${PYTHONPATH:-}" /usr/bin/env "${COMMAND[@]}"
+PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}" "${REPO_VENV_PATH}/bin/python3" "$@"
