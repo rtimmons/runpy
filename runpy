@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -eou pipefail
+set -x
 
 # docker run -i -v $PWD:$PWD ubuntu:bionic $PWD/runpy
 
@@ -22,10 +23,10 @@ set -eou pipefail
 # No edits intended beyond this line.
 
 # TODO: this is useful for debugging
-export PATH=$PWD
-export PATH="/bin:$PATH"
-export PATH="/usr/bin:$PATH"
-export PATH="/usr/local/bin:$PATH"
+# export PATH=$PWD
+# export PATH="/bin:$PATH"
+# export PATH="/usr/bin:$PATH"
+# export PATH="/usr/local/bin:$PATH"
 # export PATH="/Users/rtimmons/.pyenv/shims:$PATH"
 
 _pip() {
@@ -102,38 +103,6 @@ _recommend_pyenv() {
     fi
 }
 
-
-if ! which python3 >/dev/null 2>&1; then
-    echo >&2 "No base python3 installed."
-    echo >&2 ""
-    _recommend_pyenv
-    _print_diagnostics
-    exit 1
-fi
-
-
-if ! python3 -c 'import sys; sys.exit(1 if sys.version_info < (3, 7) else 0)' >/dev/null 2>&1; then
-    actual_version=$(python3 -c 'import sys; print(sys.version)')
-    echo >&2 "You must have python3.7+ installed."
-    echo >&2 "Detected version $actual_version."
-    echo >&2 ""
-    _recommend_pyenv
-    _print_diagnostics
-    exit 1
-fi
-
-if [[ -n "${VIRTUAL_ENV:-}" && "${VIRTUAL_ENV}" != "${REPO_VENV_PATH}" ]]; then
-    echo >&2 "You are already inside a virtual environment $VIRTUAL_ENV."
-    echo >&2 "This can be problematic. Please deactivate your existing virtualenv first:"
-    echo >&2 ""
-    echo >&2 "    deactivate"
-    echo >&2 ""
-    _print_diagnostics
-    exit 1
-fi
-
-# TODO: handle the "true bootstrap" scenario and install pyenv.
-
 _install_pyenv() {
     local set_pyenv_root
     # TODO: install in venv root or something?
@@ -166,6 +135,7 @@ if [ -e "${REPO_ROOT}/.python-version" ]; then
     pushd "${REPO_ROOT}" >/dev/null
         echo "Installing python $(cat "${REPO_ROOT}/.python-version")"
         pyenv install -s
+        # cat /tmp/python-build.*.log
     popd >/dev/null
 fi
 
@@ -191,6 +161,37 @@ if which pyenv >/dev/null 2>&1; then
         _print_diagnostics
     fi
 fi
+
+if ! which python3 >/dev/null 2>&1; then
+    echo >&2 "No base python3 installed."
+    echo >&2 ""
+    _recommend_pyenv
+    _print_diagnostics
+    exit 1
+fi
+
+
+if ! python3 -c 'import sys; sys.exit(1 if sys.version_info < (3, 7) else 0)' >/dev/null 2>&1; then
+    actual_version=$(python3 -c 'import sys; print(sys.version)')
+    echo >&2 "You must have python3.7+ installed."
+    echo >&2 "Detected version $actual_version."
+    echo >&2 ""
+    _recommend_pyenv
+    _print_diagnostics
+    exit 1
+fi
+
+if [[ -n "${VIRTUAL_ENV:-}" && "${VIRTUAL_ENV}" != "${REPO_VENV_PATH}" ]]; then
+    echo >&2 "You are already inside a virtual environment $VIRTUAL_ENV."
+    echo >&2 "This can be problematic. Please deactivate your existing virtualenv first:"
+    echo >&2 ""
+    echo >&2 "    deactivate"
+    echo >&2 ""
+    _print_diagnostics
+    exit 1
+fi
+
+# TODO: handle the "true bootstrap" scenario and install pyenv.
 
 if ! python3 -c 'import sys; sys.exit(1 if "Python3.framework" in sys.prefix else 0)' >/dev/null 2>&1; then
     actual_prefix=$(python3 -c 'import sys; print(sys.prefix)')
