@@ -17,8 +17,14 @@ set -eou pipefail
 
     CRYPTO_WORKAROUND=true
 
-
 # No edits intended beyond this line.
+
+# TODO: this is useful for debugging
+export PATH=$PWD
+export PATH="/bin:$PATH"
+export PATH="/usr/bin:$PATH"
+export PATH="/usr/local/bin:$PATH"
+# export PATH="/Users/rtimmons/.pyenv/shims:$PATH"
 
 _pip() {
     if [[ "${CRYPTO_WORKAROUND}" == "true" ]]; then
@@ -27,6 +33,32 @@ _pip() {
         /usr/bin/env python3 -m pip "$@" --isolated -q -q
     fi
 }
+
+resolve() {
+    local cmd=$1
+    shift
+
+    local whch
+    whch="$(which "$cmd" 2>/dev/null)"
+    if [ -z "$whch" ]; then
+        echo "No command '$cmd'" >/dev/stderr
+        exit 1
+    fi
+
+    cd "$(dirname "$whch")"
+    [ -L "$cmd" ] && cmd="$(readlink "$cmd")"
+
+    cd "$(dirname "$cmd")"
+    if [ -L "$cmd" ]; then
+        # recurse
+        resolve "$cmd"
+        return
+    fi
+
+    cmd="$(basename "$cmd")"
+    echo "$(pwd -P)/$cmd"
+}
+
 
 pushd "$(dirname "$0")" >/dev/null
     REPO_ROOT="$(pwd -P)"
@@ -54,32 +86,75 @@ _print_diagnostics() {
     _HAVE_PRINTED_DIAGNOSTICS=1
 }
 
+_recommend_pyenv() {
+    echo >&2 "runpy recommends you use pyenv:"
+    echo >&2 ""
+    echo >&2 "    curl https://pyenv.run | bash"
+    echo >&2 ""
+    echo >&2 "Ensure you restart your shell."
+    if /usr/bin/which brew >/dev/null 2>&1; then
+        echo >&2 "On macOS, another option is to use homebrew python:"
+        echo >&2 ""
+        echo >&2 "    brew install python3"
+        echo >&2 ""
+    fi
+}
+
+
+if ! /usr/bin/which python3 >/dev/null 2>&1; then
+    echo >&2 "No base python3 installed."
+    echo >&2 ""
+    _recommend_pyenv
+    _print_diagnostics
+    exit 1
+fi
+
 
 if ! python3 -c 'import sys; sys.exit(1 if sys.version_info < (3, 7) else 0)' >/dev/null 2>&1; then
     actual_version=$(python3 -c 'import sys; print(sys.version)')
     echo >&2 "You must have python3.7+ installed."
     echo >&2 "Detected version $actual_version."
     echo >&2 ""
-    echo >&2 "On macOS you can run:"
+    _recommend_pyenv
+    _print_diagnostics
+    exit 1
+fi
+
+if [[ -n "${VIRTUAL_ENV:-}" && "${VIRTUAL_ENV}" != "${REPO_VENV_PATH}" ]]; then
+    echo >&2 "You are already inside a virtual environment $VIRTUAL_ENV."
+    echo >&2 "This can be problematic. Please deactivate your existing virtualenv first:"
     echo >&2 ""
-    echo >&2 "    brew install python3"
+    echo >&2 "    deactivate"
     echo >&2 ""
     _print_diagnostics
     exit 1
 fi
 
-if [ -n "${VIRTUAL_ENV:-}" ] && [ "${VIRTUAL_ENV}" != "${REPO_VENV_PATH}" ]; then
-    echo >&2 "You are already inside a virtual environment $VIRTUAL_ENV."
-    echo >&2 "This can be problematic. Will try to proceed, but setup may fail."
-    echo >&2 "If it does, please deactivate your existing virtualenv first:"
+# TODO: handle the "true bootstrap" scenario and install pyenv.
+
+if [ -e "${REPO_ROOT}/.python-version" ] && ! which pyenv >/dev/null 2>&1; then
+    echo >&2 "There is a .python-version file at ${REPO_ROOT}/.python-version"
+    echo >&2 "but pyenv is not installed."
     echo >&2 ""
-    echo >&2 "    deactivate"
+    echo >&2 "Install pyenv with the following:"
     echo >&2 ""
+    echo >&2 "    curl https://pyenv.run | bash"
+    echo >&2 ""
+    echo >&2 "And then ensure you restart your shell."
+    echo >&2
     _print_diagnostics
-    echo >&2 ""
+    exit 1
 fi
 
 if which pyenv >/dev/null 2>&1; then
+    py3=$(resolve python3)
+    pye3=$(pyenv which python3)
+
+    if [[ "$py3" != "$pye3" ]]; then
+        eval "$(pyenv init -)"
+        hash -r
+    fi
+
     if pyenv version | grep system >/dev/null 2>&1; then
         echo >&2 "You have system python setup through pyenv."
         echo >&2 "pyenv version: $(pyenv version)"
@@ -96,25 +171,18 @@ fi
 
 if ! python3 -c 'import sys; sys.exit(1 if "Python3.framework" in sys.prefix else 0)' >/dev/null 2>&1; then
     actual_prefix=$(python3 -c 'import sys; print(sys.prefix)')
-    echo >&2 "The python built into macOS Catalania is known to be problematic."
+    echo >&2 "The python built into macOS is known to be problematic."
     echo >&2 "It complains with 'architecture not supported' during setup."
     echo >&2 "Detected system prefix: $actual_prefix"
     echo >&2 ""
-    echo >&2 "On macOS you can run:"
-    echo >&2 ""
-    echo >&2 "    brew install python3"
-    echo >&2 ""
+    _recommend_pyenv
     _print_diagnostics
     exit 1
 fi
 
 if ! _pip --version >/dev/null 2>&1; then
     echo >&2 "Your installation of python does not contain pip."
-    echo >&2 "On macOS you can run:"
-    echo >&2 ""
-    echo >&2 "    brew install python3"
-    echo >&2 ""
-    echo >&2 "If this error persists, check that your PATH points to the correct python location."
+    _recommend_pyenv
     _print_diagnostics
     exit 1
 fi
@@ -150,3 +218,16 @@ if [[ ! -d "${REPO_VENV_PATH}" || ! -e "${REPO_VENV_PATH}/runpy-setup-done-v3" ]
 fi
 
 PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}" "${REPO_VENV_PATH}/bin/python3" "$@"
+
+
+# py3=$(resolve python3)
+# pye3=$(pyenv which python3)
+# if [[ "$py3" != "$pye3" ]]; then
+#     echo >&2 "Pyenv is installed but could not be activated."
+#     echo >&2 ""
+#     echo >&2 "    which python3:       $py3"
+#     echo >&2 "    pyenv which python3: $pye3"
+#     echo >&2 ""
+#     (pyenv init) >/dev/stderr
+#     exit 1
+# fi
